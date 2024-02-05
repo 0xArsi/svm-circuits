@@ -92,7 +92,18 @@ C: CurveAffineExt<Base = BF, ScalarExt = SF>{
             eccc.assert_is_on_curve::<C>(ctx, &A);
 
 
-            let lhs = eccc.scalar_mult::<C>(ctx, B, S.limbs().to_vec(), bc.limb_bits, bc.limb_bits);
+            let lhs = eccc.scalar_mult::<C>(ctx, B.clone(), S.limbs().to_vec(), bc.limb_bits, bc.limb_bits);
+
+            let hram_a = eccc.scalar_mult::<C>(ctx, B, hash_RAM.limbs().to_vec(), bc.limb_bits, bc.limb_bits);
+
+            let rhs = eccc.add_unequal(ctx, R, hram_a, false);
+
+            let diff = eccc.sub_unequal(ctx, lhs, rhs, false);
+            let cofac = sc.load_constant_uint(ctx, BigUint::from(8 as usize));
+            let diff_mul_cofac = eccc.scalar_mult::<C>(ctx, diff, cofac.limbs().to_vec(), bc.limb_bits, bc.limb_bits); 
+
+            //there is only one point with a zero x coordinate (the additive identity)
+            bc.is_zero(ctx, diff_mul_cofac.x);
 
 
     }
@@ -101,15 +112,17 @@ C: CurveAffineExt<Base = BF, ScalarExt = SF>{
 
 
 
-//impl<'chip, F: BigPrimeField, Fp: BigPrimeField> Chip<F> for EddsaChip<'chip, F, Fp>{
-//    type Config = EddsaChipConfig<'chip, F, Fp>;
-//    type Loaded = ();
-//
-//    fn config(&self) -> Self::Config {
-//        self.chip_config
-//    }
-//
-//    fn loaded(&self) -> &Self::Loaded {
-//       &() 
-//    }
-//}
+impl<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C> Chip<F> for EddsaChip<'chip, F, BF, SF, C>
+where
+C: CurveAffineExt<Base = BF, ScalarExt = SF>{
+   type Config = EddsaChipConfig<'chip, F, BF, SF>;
+   type Loaded = ();
+
+   fn config(&self) -> &Self::Config {
+       self.chip_config
+   }
+
+   fn loaded(&self) -> &Self::Loaded {
+      &() 
+   }
+}
