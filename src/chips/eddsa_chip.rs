@@ -1,14 +1,25 @@
 use std::marker::PhantomData;
 
 
-use halo2_ecc::ecc::EccChip;
+use ark_ed25519::{EdwardsAffine as G1Affine, EdwardsConfig, EdwardsProjective as G1Projective}; 
+use ark_ed25519::Fr;
+use halo2_base::halo2_proofs::halo2curves::ed25519::{Ed25519, Ed25519Affine};
+use halo2_base::halo2_proofs::plonk::Assigned;
+use halo2_base::utils::{biguint_to_fe, CurveAffineExt};
+use halo2_base::{AssignedValue, Context};
+use halo2_ecc::bigint::{CRTInteger, ProperCrtUint};
+use halo2_ecc::ecc::{EcPoint, EccChip};
 use halo2_ecc::halo2_base::utils::{BigPrimeField, ScalarField};
+use halo2_proofs::pasta::group::cofactor;
 use halo2_proofs::pasta::group::ff::PrimeField;
-use halo2_proofs::plonk::{Advice, Instance, Selector, Column, ConstraintSystem};
-use halo2_proofs::arithmetic::Field;
-use halo2_proofs::circuit::Chip;
+use halo2_proofs::pasta::pallas::Base;
+use halo2_proofs::plonk::{Advice, Column, ConstraintSystem, Error, Instance, Selector};
+use halo2_proofs::arithmetic::{CurveAffine, Field};
+use halo2_proofs::circuit::{Chip, Value};
 use halo2_ecc::fields::{fp::FpChip, FieldChip};
 use halo2_base::gates::range::RangeChip;
+use halo2_base::halo2_proofs::halo2curves::ed25519::TwistedEdwardsCurveAffineExt;
+use num_bigint::BigUint;
 /*
 @note
 •   EdDSA field chip needs to check the following:
@@ -16,50 +27,89 @@ use halo2_base::gates::range::RangeChip;
     •   signer address is inside Ed25519 scalar field
     •   all hashed values lie inside Ed25519 the scalar field
 •   We need an FpChip for all of these things
+
+•   May need to make own CurveParams struct that holds a curve type,
+    base field type, and scalar field type
+
+•   Note that even though eddsa uses edwards curves this implementation should
+    be curve agnostic
 */
 #[derive(Clone, Debug)]
-pub struct EddsaChipConfig<'chip, F: BigPrimeField, Fp: BigPrimeField>{
-    limbs: usize,
-    bits_per_limb: usize,
-    ecc_chip: &'chip EccChip<'chip, F, FpChip<'chip, F, Fp>>,
+pub struct EddsaChipConfig<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField> {
+    ecc_chip: &'chip EccChip<'chip, F, FpChip<'chip, F, BF>>,
+    scalar_chip: &'chip FpChip<'chip, F, SF>,
 }
 
-impl<'chip, F: BigPrimeField, Fp: BigPrimeField> EddsaChipConfig<'chip, F, Fp> {
+impl<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField> EddsaChipConfig<'chip, F, BF, SF> {
     fn new(
-        ecc_chip: &'chip EccChip<'chip, F, FpChip<'chip, F, Fp>>,
-        limbs: usize,
-        bits_per_limb: usize,
-    ) -> EddsaChipConfig<'chip, F, Fp>{
-
-        EddsaChipConfig { 
-            limbs: limbs,
-            bits_per_limb: bits_per_limb,
+        ecc_chip: &'chip EccChip<'chip, F, FpChip<'chip, F, BF>>,
+        scalar_chip: &'chip FpChip<'chip, F, SF>,
+    ) -> EddsaChipConfig<'chip, F, BF, SF>{
+        EddsaChipConfig{ 
             ecc_chip: ecc_chip,
+            scalar_chip: scalar_chip,
         }
     }
 }
 
-pub struct EddsaChip<'chip, F: BigPrimeField, Fp: BigPrimeField>{
-    chip_config: EddsaChipConfig<'chip, F, Fp>,
+//@note deserialization of signature is handled outside of chip
+pub struct EddsaChip<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C>
+    where
+    C: CurveAffineExt<Base = BF, ScalarExt = SF>{
+    pub chip_config: &'chip EddsaChipConfig<'chip, F, BF, SF>,
+    _marker: PhantomData<C>
 }
 
-impl<'chip, F: BigPrimeField, Fp: BigPrimeField> EddsaChip<'chip, F, Fp>{
-    fn new(limbs: usize, bits_per_limb: usize, ecc_chip: &'chip EccChip<'chip, F, FpChip<'chip, F, Fp>>) -> EddsaChip<'chip, F, Fp>{
-        let cf = EddsaChipConfig::new(ecc_chip, limbs, bits_per_limb);
-        EddsaChip {
-            chip_config: cf,
+impl<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C> EddsaChip<'chip, F, BF, SF, C>
+where
+C: CurveAffineExt<Base = BF, ScalarExt = SF>{
+    fn new(chip_config: &'chip EddsaChipConfig<F, BF, SF>) -> EddsaChip<'chip, F, BF, SF, C>{
+        EddsaChip{
+            chip_config: chip_config,
+            _marker: PhantomData::<C>,
         }
     }
-}
-impl<'chip, F: BigPrimeField, Fp: BigPrimeField> Chip<F> for EddsaChip<'chip, F, Fp>{
-    type Config = EddsaChipConfig<'chip, F, Fp>;
-    type Loaded = ();
 
-    fn config(&self) -> &Self::Config {
-        &self.chip_config
+    fn verify_sig(
+        &self, 
+        ctx: &mut Context<F>,
+        M: ProperCrtUint<F>, 
+        B: EcPoint<F, <FpChip<F, BF> as FieldChip<F>>::FieldPoint>, 
+        R: EcPoint<F, <FpChip<F, BF> as FieldChip<F>>::FieldPoint>, 
+        S: ProperCrtUint<F>,
+        A: EcPoint<F, <FpChip<F, BF> as FieldChip<F>>::FieldPoint>, 
+        hash_RAM: ProperCrtUint<F>){
+
+            let eccc = self.chip_config.ecc_chip; 
+            let sc = self.chip_config.scalar_chip;
+            let bc = eccc.field_chip;
+
+            sc.enforce_less_than_p(ctx, S.clone());
+
+
+            eccc.assert_is_on_curve::<C>(ctx, &R);
+            eccc.assert_is_on_curve::<C>(ctx, &B);
+            eccc.assert_is_on_curve::<C>(ctx, &A);
+
+
+            let lhs = eccc.scalar_mult::<C>(ctx, B, S.limbs().to_vec(), bc.limb_bits, bc.limb_bits);
+
+
     }
 
-    fn loaded(&self) -> &Self::Loaded {
-       &() 
-    }
 }
+
+
+
+//impl<'chip, F: BigPrimeField, Fp: BigPrimeField> Chip<F> for EddsaChip<'chip, F, Fp>{
+//    type Config = EddsaChipConfig<'chip, F, Fp>;
+//    type Loaded = ();
+//
+//    fn config(&self) -> Self::Config {
+//        self.chip_config
+//    }
+//
+//    fn loaded(&self) -> &Self::Loaded {
+//       &() 
+//    }
+//}
