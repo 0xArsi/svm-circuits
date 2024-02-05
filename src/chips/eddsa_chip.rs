@@ -22,17 +22,18 @@ use halo2_base::halo2_proofs::halo2curves::ed25519::TwistedEdwardsCurveAffineExt
 use num_bigint::BigUint;
 /*
 @note
-•   EdDSA field chip needs to check the following:
-    •   signature is inside Ed25519 scalar field
-    •   signer address is inside Ed25519 scalar field
+•   EdDSA hip needs to check the following:
+    •   public key (A), base point (B), signature point (R) are on curve 
+    •   S = r + H(R||A||M)s is inside scalar field
     •   all hashed values lie inside Ed25519 the scalar field
-•   We need an FpChip for all of these things
-
-•   May need to make own CurveParams struct that holds a curve type,
-    base field type, and scalar field type
 
 •   Note that even though eddsa uses edwards curves this implementation should
     be curve agnostic
+•   Implementation inspired by https://github.com/shuklaayush/halo2-lib-eddsa
+•   TODO:
+    •   Optimize w/ projective coordinate operations
+    •   Verify correctness of hash
+
 */
 #[derive(Clone, Debug)]
 pub struct EddsaChipConfig<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField> {
