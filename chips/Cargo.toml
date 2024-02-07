@@ -1,0 +1,10 @@
+[package]
+name="chips"
+
+edition = "2021"
+[dependencies]
+ark-ed25519 = "0.4.0"
+halo2-base = "0.4.1"
+halo2-ecc = "0.4.1"
+halo2_proofs = "0.3.0"
+num-bigint = "0.4.4"
