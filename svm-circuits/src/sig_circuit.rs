@@ -3,7 +3,11 @@ use halo2_ecc::{halo2_base::{utils::BigPrimeField}, ecc::EccChip};
 use halo2_ecc::fields::fp::FpChip;
 use halo2_proofs::{
     arithmetic::Field,
+    circuit::{
+        SimpleFloorPlanner,
+    }
     plonk::{
+        Circuit,
         Column, 
         Advice,
         Instance,
@@ -12,7 +16,7 @@ use halo2_proofs::{
     }
 };
 
-use chips::eddsa_chip::EddsaChip;
+use chips::eddsa_chip::{self, EddsaChip};
 /*
 @note
 
@@ -35,18 +39,26 @@ use chips::eddsa_chip::EddsaChip;
     }
 
 */
-//pub struct SigCircuit<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C> 
-//    where
-//    C: CurveAffineExt<Base = BF, ScalarExt = SF>{
-//    //nothing yet tx circuit for solana VM
-//    pub sigs: Vec<Vec<u8>>,
-//    pub signers: Vec<Vec<u8>>, 
-//}
-//
-//impl<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C> SigCircuit<'chip, F, BF, SF, C>
-//    where
-//    C: CurveAffineExt<Base = BF, ScalarExt = SF>{
-//    pub fn configure(cs: &mut ConstraintSystem<F>){
-//        //assign each
-//    }
-//}
+pub struct SigCircuitConfig<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C> 
+    where
+    C: CurveAffineExt<Base = BF, ScalarExt = SF>{
+    pub eddsa_chip: EddsaChip<'chip, F, BF, SF, C>,
+    pub sig_advice: Column<Advice>,
+    pub signer_advice: Column<Advice>,
+    pub instance: Column<Instance>,
+    pub selector: Selector,
+
+}
+pub struct SigCircuit<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C> 
+    where
+    C: CurveAffineExt<Base = BF, ScalarExt = SF>{
+    //nothing yet tx circuit for solana VM
+    pub sc_config: SigCircuitConfig<'chip, F, BF, SF, C>,
+    pub sigs: Vec<Vec<u8>>,
+    pub signers: Vec<Vec<u8>>, 
+}
+
+impl<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField, C> SubCircuit<F> for SigCircuit<'chip, F, BF, SF, C>
+    where
+    C: CurveAffineExt<Base = BF, ScalarExt = SF>{
+}
