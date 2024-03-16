@@ -24,9 +24,9 @@ pub trait SubCircuitConfig<F: BigPrimeField>{
 pub trait SubCircuit<F: BigPrimeField>{
     type Config: SubCircuitConfig<F>;
 
-    fn instance(&self) -> Vec<Vec<F>>{
-        vec![]
-    }
+    // fn instance(&self) -> Vec<Vec<F>>{
+    //     vec![]
+    // }
 
     fn synthesize_sub(
         &self,

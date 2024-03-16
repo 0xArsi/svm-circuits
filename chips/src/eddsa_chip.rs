@@ -26,6 +26,7 @@ use num_bigint::BigUint;
     •   public key (A), base point (B), signature point (R) are on curve 
     •   S = r + H(R||A||M)s is inside scalar field
     •   all hashed values lie inside Ed25519 the scalar field
+    • SB = rB + H(R||A||M)sB = R + H(R||A||M)A
 
 •   Note that even though eddsa uses edwards curves this implementation should
     be curve agnostic
@@ -37,8 +38,8 @@ use num_bigint::BigUint;
 */
 #[derive(Clone, Debug)]
 pub struct EddsaChipConfig<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField> {
-    ecc_chip: &'chip EccChip<'chip, F, FpChip<'chip, F, BF>>,
-    scalar_chip: &'chip FpChip<'chip, F, SF>,
+   pub ecc_chip: &'chip EccChip<'chip, F, FpChip<'chip, F, BF>>,
+   pub scalar_chip: &'chip FpChip<'chip, F, SF>,
 }
 
 impl<'chip, F: BigPrimeField, BF: BigPrimeField, SF: BigPrimeField> EddsaChipConfig<'chip, F, BF, SF> {
@@ -71,15 +72,14 @@ C: CurveAffineExt<Base = BF, ScalarExt = SF>{
         }
     }
 
-    fn verify_sig(
+    pub fn verify_sig(
         &self, 
         ctx: &mut Context<F>,
-        M: ProperCrtUint<F>, 
         B: EcPoint<F, <FpChip<F, BF> as FieldChip<F>>::FieldPoint>, 
         R: EcPoint<F, <FpChip<F, BF> as FieldChip<F>>::FieldPoint>, 
         S: ProperCrtUint<F>,
         A: EcPoint<F, <FpChip<F, BF> as FieldChip<F>>::FieldPoint>, 
-        hash_RAM: ProperCrtUint<F>){
+        hash_RAM: ProperCrtUint<F>) -> Result<(), Error>{
 
             let eccc = self.chip_config.ecc_chip; 
             let sc = self.chip_config.scalar_chip;
@@ -105,6 +105,7 @@ C: CurveAffineExt<Base = BF, ScalarExt = SF>{
 
             //there is only one point with a zero x coordinate (the additive identity)
             bc.is_zero(ctx, diff_mul_cofac.x);
+            Ok(())
             
 
 
